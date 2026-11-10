@@ -1,0 +1,4 @@
+# The pipeline prefers the Python standard library and the public Overpass API.
+# pyshp is used only when Overpass is unreachable and the pipeline falls back
+# to a Geofabrik Thailand shapefile extract.
+pyshp>=2.3.1

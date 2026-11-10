@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>About &amp; methodology — Thailand Gas Station Site Finder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/app.css" />
+  <style>
+    body { overflow: auto; }
+    .about { max-width: 800px; margin: 0 auto; padding: 24px 20px 80px; }
+    .about h1 { font-size: 26px; margin: 12px 0 8px; }
+    .about h2 { font-size: 18px; margin: 28px 0 8px; }
+    .about p, .about li { color: var(--text); line-height: 1.6; }
+    .about table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 8px 0 16px; }
+    .about th, .about td { border: 1px solid var(--line); padding: 6px 8px; text-align: left; vertical-align: top; }
+    .about th { background: var(--bg-elev-2); }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <a class="brand" href="./">
+      <div class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M4 20V8l4 6 3-8 3 8h2V8" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M18 8v8a2 2 0 0 0 4 0V10" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1>Thailand Gas Station Site Finder</h1>
+        <p>About, methodology and data provenance</p>
+      </div>
+    </a>
+    <div class="header-actions">
+      <a class="text-btn primary" href="./">Back to the map</a>
+    </div>
+  </header>
+  <main class="about">
+    <h1>About this tool</h1>
+    <p>This is a <strong>site-selection and investment-screening</strong> tool for land in Thailand that might suit a high-traffic petrol or service station. It is not a complete property search, and it is not investment, legal or engineering advice. Always verify the title deed (chanote), access rights, zoning and the actual site with a surveyor and the local authorities before you act.</p>
+    <p>The live board is a static GitHub Pages site. Listings are collected by a Python pipeline in this repository, enriched with OpenStreetMap, scored, and written to <code>docs/data/listings.json</code>. A GitHub Action can refresh that file weekly.</p>
+
+    <h2>What is verified, estimated or unavailable</h2>
+    <p>Every field carries a badge. Nothing is invented to fill a gap.</p>
+    <table>
+      <tr><th>Badge</th><th>Meaning</th></tr>
+      <tr><td>Verified</td><td>Taken from the public listing (title, card, description or schema.org fields published by the source).</td></tr>
+      <tr><td>Calculated</td><td>Derived only from verified listing figures — for example asking price ÷ land area to get price per rai, or conversion of square metres to rai (1 rai = 1,600 sqm = 4 ngan = 400 sq wah).</td></tr>
+      <tr><td>Estimated</td><td>Derived from OpenStreetMap, a locality geocode, or a documented proxy. Not a surveyed or official figure.</td></tr>
+      <tr><td>Data not available</td><td>The information was not in the listing and was not inferred.</td></tr>
+    </table>
+    <p>If several listings share the exact same published coordinates, those points are relabelled Estimated (area / locality centroid), because they are unlikely to be surveyed parcel locations.</p>
+
+    <h2>Where the listings come from</h2>
+    <p>The collector only requests publicly accessible pages, identifies itself, waits between requests, and skips a site if robots.txt disallows the path or if the site returns a captcha or access block. It does not log in, does not call disallowed APIs, and does not bypass captchas.</p>
+    <table>
+      <tr><th>Source</th><th>How it is used</th></tr>
+      <tr><td>DotProperty (<code>dotproperty.co.th</code>)</td><td>Primary source. Public land-for-sale pages include a schema.org ItemList with title, price, photos, address, description and coordinates. robots.txt allows these listing pages.</td></tr>
+      <tr><td>FazWaz (<code>fazwaz.com</code>)</td><td>Supplementary. Public land-for-sale search pages embed listing cards (title, price, area, address, photo, URL). Public HTML does not include GPS; coordinates are only added if the locality is precise enough to geocode (see below). <code>/api/</code> and <code>/graphql</code> are not used (disallowed).</td></tr>
+      <tr><td>DDproperty, Hipflat, Baania</td><td>Tried and skipped: Cloudflare challenge, HTTP 401, or IP block.</td></tr>
+      <tr><td>Livinginsider</td><td>Listing pages are allowed by robots.txt, but the sitemap was blocked (CloudFront 403) from this crawler, so it was not harvested in the first release.</td></tr>
+      <tr><td>Kaidee, home.co.th search/API paths</td><td>Disallowed in robots.txt; not collected.</td></tr>
+    </table>
+    <p>DotProperty and FazWaz share a lot of inventory (photos often come from the same CDN). The pipeline deduplicates by FazWaz unit id, or by coordinates + price + area, and keeps the richer record. The number of listings on the board is whatever was legitimately collected in the last run — it is a sample, not every land plot for sale in Thailand.</p>
+
+    <h2>Coordinates</h2>
+    <p>If a listing publishes coordinates, they are used and marked Verified, unless they are clearly a shared area centroid (then Estimated). If a listing has no coordinates but names a <em>subdistrict, district and province</em>, the pipeline may look up a Nominatim centroid and mark it Estimated (approximate locality, not a parcel survey). A province-only address is not geocoded — the map pin is omitted and the field stays “Data not available.”</p>
+
+    <h2>Traffic potential</h2>
+    <p>Official Department of Highways traffic-count figures were not matched to individual sites in this release. There is no invented vehicle count. Instead, each mapped site gets a <strong>0–100 proxy</strong>, labelled Estimated, built from:</p>
+    <ul>
+      <li>OpenStreetMap highway class of the nearest major road (motorway, trunk, primary, secondary, tertiary)</li>
+      <li>OSM <code>lanes</code> tag, when present</li>
+      <li>Straight-line distance to that road</li>
+      <li>Count of distinct major OSM ways within 800 m (a proxy for intersections and access — not a surveyed junction or U-turn list)</li>
+      <li>Nearby industrial land, malls, shops, schools, hospitals, attractions, hotels and towns</li>
+    </ul>
+    <p>Missing components are skipped, not filled in. The method is a screening hint only.</p>
+
+    <h2>Competition and demand generators</h2>
+    <p>Existing fuel stations are OpenStreetMap points tagged <code>amenity=fuel</code>, counted within 1, 3, 5 and 10 km. Names and brands are whatever OSM has. Coverage in Thailand is good in many corridors and thin in others — treat counts as Estimated. Nearby convenience stores, restaurants, EV chargers, malls, industrial areas, schools, hospitals and attractions also come from OSM and are labelled Estimated.</p>
+
+    <h2>Zoning</h2>
+    <p>Thai city-plan zoning (ผังเมือง) is generally not available through a public API. This tool does <strong>not</strong> guess zoning. The field is “Data not available,” with a link to the official Department of Public Works and Town &amp; Country Planning (DPT) city-plan viewer: <a href="https://oneplan.dpt.go.th/" target="_blank" rel="noopener">oneplan.dpt.go.th</a>. Confirm with the local authority.</p>
+
+    <h2>Suitability score (0–100)</h2>
+    <p>Default weights, which you can change on the map (they are renormalised to 100):</p>
+    <table>
+      <tr><th>Factor</th><th>Default weight</th><th>What it uses</th></tr>
+      <tr><td>Traffic potential</td><td>30%</td><td>The OSM proxy above</td></tr>
+      <tr><td>Road access &amp; visibility</td><td>20%</td><td>Road class, distance, lanes if tagged, and listing frontage when stated</td></tr>
+      <tr><td>Land size &amp; suitability</td><td>15%</td><td>Plot area vs a typical station range of about 0.5–5 rai (larger plots can still suit a service plaza)</td></tr>
+      <tr><td>Competition</td><td>15%</td><td>OSM fuel-station counts at 1 / 3 / 5 / 10 km</td></tr>
+      <tr><td>Surrounding demand generators</td><td>10%</td><td>Industrial, retail, towns, institutions and tourism nearby</td></tr>
+      <tr><td>Land price / value</td><td>10%</td><td>Asking price per rai compared with the median in this dataset for the same province (or nationally if the province sample is small). Cheaper scores higher on <em>value</em> — that is not the same as a better site.</td></tr>
+    </table>
+    <p>Missing-factor rule:</p>
+    <ul>
+      <li>If a factor can be computed from listing or OSM inputs, it is <em>computed</em>.</li>
+      <li>If the factor needs a location and coordinates are missing, it is scored <strong>35 (penalty)</strong> and marked imputed.</li>
+      <li>If a non-location input is missing (for example no asking price), it is scored <strong>50 (neutral)</strong> and marked imputed.</li>
+    </ul>
+    <p>The overall score is the weighted average of all six factors, including imputations, so the weights still add to 100. <strong>Data completeness</strong> is the share of that weight that came from computed factors, not imputations. Marker colours: green = 70 and above, yellow = 45–69, red = under 45.</p>
+    <p>Advantages and risks are generated only from these facts. They are not marketing copy.</p>
+
+    <h2>How to run the pipeline</h2>
+    <p>From the repository root, with Python 3.11 or newer. The pipeline uses only the standard library unless you need the OpenStreetMap Geofabrik fallback (<code>pip install -r pipeline/requirements.txt</code> installs <code>pyshp</code>):</p>
+    <p><code>python -m pipeline.run --max-pages 3 --delay 1.25</code></p>
+    <p>This writes <code>docs/data/listings.json</code>. Use <code>--skip-collect</code> to reuse a cached harvest and only re-enrich and rescore. The GitHub Action “Update listings” does the same on a weekly schedule, or when you run it manually. Please keep request delays polite.</p>
+
+    <h2>Disclaimer</h2>
+    <p>Listings, prices and availability change without notice. Photos are loaded from the original listing CDN and may break if that host restricts hotlinking. OpenStreetMap data is © OpenStreetMap contributors, ODbL. Listing text and photos remain the property of their publishers; this tool links back to the original listing and is an independent screening aid, not an official product of those sites or of any government agency.</p>
+  </main>
+</body>
+</html>

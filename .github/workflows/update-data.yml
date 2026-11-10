@@ -1,0 +1,59 @@
+name: Update listings
+
+on:
+  schedule:
+    # Monday 02:00 UTC = 09:00 Asia/Bangkok
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+    inputs:
+      max_pages:
+        description: "Max search pages per province"
+        required: false
+        default: "2"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache OSM and geocode responses
+        uses: actions/cache@v4
+        with:
+          path: pipeline/cache
+          key: pipeline-cache-${{ github.run_id }}
+          restore-keys: |
+            pipeline-cache-
+
+      - name: Install pipeline dependencies
+        run: pip install -r pipeline/requirements.txt
+
+      - name: Run collection, enrichment and scoring
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: |
+          MAX_PAGES="${{ github.event.inputs.max_pages }}"
+          if [ -z "$MAX_PAGES" ]; then MAX_PAGES=2; fi
+          python -m pipeline.run --max-pages "$MAX_PAGES" --delay 1.4
+
+      - name: Commit updated data if it changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/data/listings.json
+          if git diff --staged --quiet; then
+            echo "No data changes to commit."
+          else
+            git commit -m "Update land listings ($(date -u +%Y-%m-%d))"
+            git push
+          fi
