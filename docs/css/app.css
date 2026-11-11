@@ -301,6 +301,12 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .badge.calculated { color: var(--calculated); background: rgba(123,196,196,.12); }
 .badge.estimated { color: var(--estimated); background: rgba(211,162,74,.14); }
 .badge.unavailable { color: var(--unavailable); background: rgba(122,135,146,.12); }
+.badge.listing-pin { color: var(--estimated); background: rgba(211,162,74,.14); text-transform: none; letter-spacing: 0; white-space: normal; }
+.badge.fallback { color: var(--unavailable); background: rgba(122,135,146,.14); text-transform: none; letter-spacing: 0; white-space: normal; }
+.badge.suspect { color: #e07070; background: rgba(224,80,80,.14); text-transform: none; letter-spacing: 0; border-color: rgba(224,80,80,.35); }
+.pin-warning { border-left: 3px solid #e07070; padding: 8px 10px; margin: 8px 0 12px; background: rgba(224,80,80,.10); border-radius: 0 8px 8px 0; font-size: 12.5px; line-height: 1.45; }
+.pin-warning strong { display: inline-flex; align-items: center; gap: 6px; }
+.card .pin-flag { font-size: 10px; color: #e07070; font-weight: 600; }
 .factors { display: flex; flex-direction: column; gap: 7px; margin: 8px 0 14px; }
 .factor .row { display: flex; justify-content: space-between; font-size: 12px; }
 .bar { height: 6px; background: var(--bg-soft); border-radius: 99px; overflow: hidden; margin-top: 3px; }

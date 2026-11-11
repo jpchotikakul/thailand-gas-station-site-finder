@@ -115,6 +115,7 @@ def slim(rec: dict) -> dict:
         "competitors": compact_competitors(rec.get("competitors")),
         "generators": compact_generators(rec.get("generators")),
         "intersection_proxy": rec.get("intersection_proxy"),
+        "pin_quality": rec.get("pin_quality"),
         "zoning": rec.get("zoning"),
         "scores": rec.get("scores"),
         "advantages": rec.get("advantages"),
@@ -128,6 +129,7 @@ def build_meta(raw: dict, listings: list[dict]) -> dict:
     provs = sorted({r.get("province") for r in listings if r.get("province")})
     with_coords = sum(1 for r in listings if (r.get("coordinates") or {}).get("value"))
     high = sum(1 for r in listings if (r.get("scores") or {}).get("band") == "high")
+    suspect = sum(1 for r in listings if (r.get("pin_quality") or {}).get("suspect"))
     prices = [
         (r.get("price_per_rai") or {}).get("value")
         for r in listings
@@ -140,6 +142,7 @@ def build_meta(raw: dict, listings: list[dict]) -> dict:
         "listings_count": len(listings),
         "with_coordinates": with_coords,
         "high_potential_count": high,
+        "suspect_pin_count": suspect,
         "average_price_per_rai": avg_ppr,
         "sources": dict(src_counts),
         "source_notes": raw.get("source_notes") or {},
@@ -150,11 +153,22 @@ def build_meta(raw: dict, listings: list[dict]) -> dict:
         "default_weights": DEFAULT_WEIGHTS,
         "dpt_city_plan_viewer": DPT_VIEWER,
         "field_provenance": {
-            "verified": "Taken from the public listing (title, card, description, or schema.org fields).",
+            "verified": "Taken from the public listing (title, card, description, or schema.org fields) — not used for map pins.",
+            "listing_pin": "Seller-placed pin published with the listing. Approximate, not a surveyed parcel location.",
             "calculated": "Derived only from verified listing figures (for example price ÷ area).",
             "estimated": "Derived from OpenStreetMap, a locality geocode, or a documented proxy. Not a surveyed or official figure.",
             "unavailable": "Not present in the listing and not inferred. Shown as “Data not available.”",
+            "imputed_neutral": "Factor scored at a neutral default (50) because a non-location input was missing.",
+            "imputed_penalty": "Factor scored at a penalty default (35) because location data was missing.",
         },
+        "pin_quality_method": (
+            "Listing pins are compared with OpenStreetMap major-road geometry. A pin is flagged "
+            "'Pin may be inaccurate' if it falls within a class-based carriageway buffer "
+            "(about 8–14 m of a centre-line, or within 8 m of any major road) or within 25 m of "
+            "two differently named or classed roads (a junction / interchange proxy). "
+            "Derived road distances, competitor counts and demand-generator counts then carry a reduced-confidence note. "
+            "This is a data-quality flag, not proof that the land is on the road."
+        ),
         "traffic_method": (
             "Official Department of Highways traffic volumes were not matched to individual sites. "
             "Traffic potential is a 0–100 proxy from OSM road class, lanes (when tagged), distance to a major road, "

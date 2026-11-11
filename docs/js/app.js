@@ -18,7 +18,8 @@
       road_type: "Road type", min_frontage: "Minimum frontage (m)", traffic: "Traffic potential",
       min_score: "Minimum suitability score", max_comp: "Max competitors within",
       source: "Data source", has_photos: "Has photos",
-      verified_only: "Verified coordinates & price only",
+      verified_only: "Listing pin & verified price only",
+      hide_suspect: "Hide listings with suspect pins",
       shortlist_only: "Shortlist only", mapped_only: "Has map coordinates",
       weights: "Score weights",
       weights_help: "Drag to change emphasis. Weights are renormalised to 100. Factor scores stay the same; only the overall total changes.",
@@ -42,7 +43,8 @@
       road_type: "ประเภทถนน", min_frontage: "หน้ากว้างขั้นต่ำ (ม.)", traffic: "ศักยภาพจราจร",
       min_score: "คะแนนความเหมาะสมขั้นต่ำ", max_comp: "คู่แข่งสูงสุดในรัศมี",
       source: "แหล่งข้อมูล", has_photos: "มีรูปภาพ",
-      verified_only: "เฉพาะพิกัดและราคาที่ตรวจจากประกาศ",
+      verified_only: "เฉพาะหมุดจากประกาศและราคาที่ยืนยัน",
+      hide_suspect: "ซ่อนประกาศที่หมุดอาจไม่ตรงแปลง",
       shortlist_only: "เฉพาะรายการที่บันทึกไว้", mapped_only: "มีพิกัดบนแผนที่",
       weights: "น้ำหนักคะแนน",
       weights_help: "ปรับน้ำหนักแล้วระบบจะปรับให้รวม 100 คะแนนย่อยไม่เปลี่ยน มีผลเฉพาะคะแนนรวม",
@@ -91,18 +93,35 @@
     document.documentElement.lang = lang;
   }
 
+  function finiteNumber(n) {
+    if (n == null || n === "") return null;
+    const x = typeof n === "number" ? n : Number(n);
+    return Number.isFinite(x) ? x : null;
+  }
   function fmtMoney(n) {
-    if (n == null || Number.isNaN(n)) return "Data not available";
-    if (n >= 1e6) return "฿" + (n / 1e6).toFixed(n >= 1e7 ? 1 : 2).replace(/\.0$/, "") + "m";
-    return "฿" + Math.round(n).toLocaleString("en-US");
+    const x = finiteNumber(n);
+    if (x == null) return "Data not available";
+    if (x >= 1e6) return "฿" + (x / 1e6).toFixed(x >= 1e7 ? 1 : 2).replace(/\.0$/, "") + "m";
+    return "฿" + Math.round(x).toLocaleString("en-US");
   }
   function fmtMoneyFull(n) {
-    if (n == null || Number.isNaN(n)) return "Data not available";
-    return "฿" + Math.round(n).toLocaleString("en-US");
+    const x = finiteNumber(n);
+    if (x == null) return "Data not available";
+    return "฿" + Math.round(x).toLocaleString("en-US");
   }
   function fmtNum(n, d = 2) {
-    if (n == null || Number.isNaN(n)) return "Data not available";
-    return Number(n).toLocaleString("en-US", { maximumFractionDigits: d });
+    const x = finiteNumber(n);
+    if (x == null) return "Data not available";
+    return x.toLocaleString("en-US", { maximumFractionDigits: d });
+  }
+  function formatTrafficPotential(rec) {
+    const tp = rec.traffic_potential || {};
+    const band = tp.band ? String(tp.band) : "";
+    const n = finiteNumber(tp.score);
+    if (band && n != null) return band + " · " + n.toLocaleString("en-US", { maximumFractionDigits: 1 });
+    if (band) return band;
+    if (n != null) return n.toLocaleString("en-US", { maximumFractionDigits: 1 });
+    return "Data not available";
   }
   function coordsOf(rec) {
     const c = val(rec.coordinates);
@@ -112,13 +131,54 @@
     return Object.assign({ overall: rec.scores?.overall, band: rec.scores?.band, completeness: rec.scores?.completeness }, SiteScore.reweight(rec, weights));
   }
 
+  function badgeLabels() {
+    return lang === "th" ? {
+      verified: "จากประกาศ",
+      calculated: "คำนวณแล้ว",
+      estimated: "ประมาณการ",
+      unavailable: "ไม่มีข้อมูล",
+      listing_pin: "หมุดจากประกาศ (ผู้ขายปัก โดยประมาณ)",
+      suspect: "หมุดอาจไม่ตรงแปลง",
+      imputed_neutral: "ค่ากลาง — ไม่มีข้อมูล",
+      imputed_penalty: "หักคะแนน — ไม่มีข้อมูล",
+    } : {
+      verified: "Verified",
+      calculated: "Calculated",
+      estimated: "Estimated",
+      unavailable: "Data not available",
+      listing_pin: "Listing pin (seller-placed, approximate)",
+      suspect: "Pin may be inaccurate",
+      imputed_neutral: "Neutral default – data missing",
+      imputed_penalty: "Penalty default – data missing",
+    };
+  }
   function badge(field, extraNote) {
     const st = typeof field === "string" ? field : statusOf(field);
-    const note = (typeof field === "object" && field && field.note) || extraNote || "";
-    const label = st === "verified" ? "Verified" : st === "calculated" ? "Calculated" : st === "estimated" ? "Estimated" : "Data not available";
-    const cls = st === "verified" ? "verified" : st === "calculated" ? "calculated" : st === "estimated" ? "estimated" : "unavailable";
+    const note = (typeof field === "object" && field && (field.note || field.suspect_reason)) || extraNote || "";
+    const labels = badgeLabels();
+    const label = labels[st] || labels.unavailable;
+    const cls = st === "verified" ? "verified"
+      : st === "calculated" ? "calculated"
+      : st === "estimated" ? "estimated"
+      : st === "listing_pin" ? "listing-pin"
+      : st === "suspect" ? "suspect"
+      : (st === "imputed_neutral" || st === "imputed_penalty") ? "fallback"
+      : "unavailable";
     const title = note ? ` title="${escapeAttr(note)}"` : "";
     return `<span class="badge ${cls}"${title}>${label}</span>`;
+  }
+  function factorBadge(key, f, rec) {
+    const st = f.status || "unavailable";
+    if (st === "imputed_neutral" || st === "imputed_penalty") return badge(st, f.note);
+    if (st === "computed") {
+      if (key === "land_size") {
+        const src = statusOf(rec.area_rai) || statusOf(rec.area_sqm) || "calculated";
+        return badge(src === "verified" || src === "calculated" ? src : "estimated", f.note);
+      }
+      if (key === "price_value") return badge("calculated", f.note);
+      return badge("estimated", f.note);
+    }
+    return badge(st, f.note);
   }
   function escapeAttr(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -155,6 +215,7 @@
       verified: $("f-verified").checked,
       shortlistOnly: $("f-shortlist").checked,
       mapped: $("f-mapped").checked,
+      hideSuspect: $("f-hide-suspect") ? $("f-hide-suspect").checked : false,
       q: ($("f-q").value || "").trim().toLowerCase(),
       sort: $("f-sort").value,
     };
@@ -200,9 +261,11 @@
     if (f.source && rec.source !== f.source && !(rec.sources || []).includes(f.source)) return false;
     if (f.photos && !(rec.photos && rec.photos.length)) return false;
     if (f.verified) {
-      if (statusOf(rec.coordinates) !== "verified") return false;
+      const cst = statusOf(rec.coordinates);
+      if (cst !== "listing_pin" && rec.coordinates?.precision !== "listing") return false;
       if (statusOf(rec.price_thb) !== "verified") return false;
     }
+    if (f.hideSuspect && rec.pin_quality?.suspect) return false;
     if (f.shortlistOnly && !shortlist.has(rec.id)) return false;
     if (f.mapped && !coordsOf(rec)) return false;
     if (f.q) {
@@ -269,7 +332,7 @@
   function markerIcon(rec) {
     const sc = scored(rec);
     const color = colorFor(sc.band);
-    const html = `<div class="score-marker" style="background:${color}"><span>${sc.overall != null ? Math.round(sc.overall) : "–"}</span></div>`;
+    const html = `<div class="score-marker" style="background:${color}"><span>${finiteNumber(sc.overall) != null ? Math.round(finiteNumber(sc.overall)) : "–"}</span></div>`;
     return L.divIcon({ className: "", html, iconSize: [28, 28], iconAnchor: [14, 26], popupAnchor: [0, -24] });
   }
 
@@ -335,7 +398,8 @@
           <div class="facts">${escapeHtml(facts)}</div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
-          <div class="score-badge ${sc.band || "low"}">${sc.overall != null ? Math.round(sc.overall) : "–"}</div>
+          <div class="score-badge ${sc.band || "low"}">${finiteNumber(sc.overall) != null ? Math.round(finiteNumber(sc.overall)) : "–"}</div>
+          ${rec.pin_quality?.suspect ? `<div class="pin-flag">${lang === "th" ? "หมุดอาจไม่ตรงแปลง" : "Pin may be inaccurate"}</div>` : ""}
           <button type="button" class="star ${shortlist.has(rec.id) ? "on" : ""}" data-star="${escapeAttr(rec.id)}" aria-label="Shortlist">★</button>
         </div>
       </article>`;
@@ -348,9 +412,8 @@
     if (typeof field !== "object") return { value: field, status: "verified" };
     if ("value" in field) return field;
     // Objects such as traffic_potential use score/band + status, not "value".
-    const value = field.score != null || field.band
-      ? [field.band, field.score != null ? Number(field.score).toFixed(1) : null].filter(Boolean).join(" · ")
-      : null;
+    const n = finiteNumber(field.score);
+    const value = n != null ? n : (field.band || null);
     return { value, status: field.status || "unavailable", note: field.note };
   }
   function kv(label, field, formatter) {
@@ -371,7 +434,7 @@
       const band = SiteScore.band(score);
       const w = sc.weights ? sc.weights[k] : f.weight;
       return `<div class="factor" title="${escapeAttr(f.note || "")}">
-        <div class="row"><span>${escapeHtml(label)} ${badge(f.status || "unavailable", f.note)}</span><span>${score != null ? fmtNum(score, 1) : "–"} · ${fmtNum(w, 0)}%</span></div>
+        <div class="row"><span>${escapeHtml(label)} ${factorBadge(k, f, rec)}</span><span>${finiteNumber(score) != null ? fmtNum(score, 1) : "–"} · ${finiteNumber(w) != null ? fmtNum(w, 0) + "%" : "–"}</span></div>
         <div class="bar ${band || ""}"><span style="width:${score != null ? score : 0}%"></span></div>
       </div>`;
     }).join("");
@@ -432,6 +495,7 @@
           <a class="text-btn primary" href="${escapeAttr(rec.source_url)}" target="_blank" rel="noopener">Open original listing</a>
           ${c ? `<a class="text-btn" href="https://www.google.com/maps?q=${c.lat},${c.lon}" target="_blank" rel="noopener">Google Maps</a>` : ""}
         </div>
+        ${rec.pin_quality?.suspect ? `<div class="pin-warning"><strong>${badge("suspect")}</strong> ${escapeHtml((rec.coordinates && rec.coordinates.suspect_reason) || (rec.pin_quality.reasons || []).join(" ") || (lang === "th" ? "หมุดนี้อยู่บนหรือใกลถนนหรือทางแยกใน OpenStreetMap อาจเป็นหมุดที่ผู้ขายปักบนถนน ไม่ใช่จุดศูนย์กลางแปลง" : "This pin sits on or next to an OpenStreetMap road or junction, so it may be a seller pin on the carriageway rather than the parcel. Road distances and nearby counts are shown with reduced confidence."))}</div>` : ""}
         <div class="kv">
           ${kv("Asking price", rec.price_thb, fmtMoneyFull)}
           ${kv("Price per rai", rec.price_per_rai, fmtMoneyFull)}
@@ -441,10 +505,10 @@
           ${kv("Road type (OSM)", rec.road?.highway)}
           ${kv("Lanes (OSM)", rec.road?.lanes)}
           ${kv("Distance to major road", rec.road?.distance_m, (v) => fmtNum(v, 0) + " m")}
-          ${kv("Traffic potential (proxy)", rec.traffic_potential, (v) => (rec.traffic_potential?.band || "") + (v != null ? " · " + fmtNum(v, 1) : ""))}
+          ${kv("Traffic potential (proxy)", rec.traffic_potential, () => formatTrafficPotential(rec))}
           ${kv("Official traffic count", rec.official_traffic_volume)}
-          <div class="item span"><div class="k">GPS coordinates ${badge(rec.coordinates)}</div><div class="v">${escapeHtml(gps)}${rec.coordinates?.precision ? " · " + escapeHtml(rec.coordinates.precision.replaceAll("_", " ")) : ""}</div></div>
-          <div class="item span"><div class="k">Zoning / city plan ${badge(rec.zoning)}</div><div class="v">Data not available. Check the official DPT viewer: <a href="${escapeAttr((rec.zoning && rec.zoning.viewer_url) || "https://oneplan.dpt.go.th/")}" target="_blank" rel="noopener">oneplan.dpt.go.th</a></div></div>
+          <div class="item span"><div class="k">GPS coordinates ${badge(rec.coordinates)}${rec.pin_quality?.suspect ? badge("suspect", rec.coordinates?.suspect_reason || (rec.pin_quality.reasons || []).join(" ")) : ""}</div><div class="v">${escapeHtml(gps)}${rec.coordinates?.precision ? " · " + escapeHtml(rec.coordinates.precision.replaceAll("_", " ")) : ""}</div></div>
+          <div class="item span"><div class="k">Zoning / city plan ${badge(rec.zoning)}</div><div class="v">Data not available. Check the official DPT viewer: <a href="${escapeAttr((rec.zoning && rec.zoning.viewer_url) || "https://onedpt.dpt.go.th/")}" target="_blank" rel="noopener">onedpt.dpt.go.th</a></div></div>
         </div>
         <div class="side-title">Score breakdown</div>
         <div class="factors">${factorHtml}</div>
@@ -518,7 +582,7 @@
       return;
     }
     const rows = [
-      ["Suitability score", (r) => { const s = scored(r); return `${s.overall} (${s.band})`; }],
+      ["Suitability score", (r) => { const s = scored(r); return `${finiteNumber(s.overall) != null ? fmtNum(s.overall, 1) : "–"} (${s.band || "–"})`; }],
       ["Data completeness", (r) => Math.round((scored(r).completeness || 0) * 100) + "%"],
       ["Province / district", (r) => [r.province_th || r.province, r.district].filter(Boolean).join(", ")],
       ["Asking price", (r) => fmtMoneyFull(val(r.price_thb))],
@@ -533,7 +597,7 @@
       ["Source", (r) => r.source],
       ["Listing", (r) => `<a href="${escapeAttr(r.source_url)}" target="_blank" rel="noopener">Open</a>`],
     ];
-    const head = `<tr><th></th>${recs.map((r) => `<th>${escapeHtml(r.title)}<div class="score-badge ${scored(r).band}" style="margin-top:6px">${scored(r).overall}</div></th>`).join("")}</tr>`;
+    const head = `<tr><th></th>${recs.map((r) => `<th>${escapeHtml(r.title)}<div class="score-badge ${scored(r).band}" style="margin-top:6px">${finiteNumber(scored(r).overall) != null ? fmtNum(scored(r).overall, 1) : "–"}</div></th>`).join("")}</tr>`;
     const body = rows.map(([label, fn]) => `<tr><td class="row-label">${escapeHtml(label)}</td>${recs.map((r) => `<td>${fn(r)}</td>`).join("")}</tr>`).join("");
     $("compare-body").innerHTML = `<div style="overflow:auto"><table class="compare-table"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
     $("compare-modal").classList.add("open");
@@ -626,7 +690,7 @@
   }
 
   function bind() {
-    ["f-province","f-district","f-area-min","f-area-max","f-price-min","f-price-max","f-ppr-min","f-ppr-max","f-frontage","f-traffic","f-comp-radius","f-comp-max","f-source","f-photos","f-verified","f-shortlist","f-mapped","f-q","f-sort","f-rings"].forEach((id) => {
+    ["f-province","f-district","f-area-min","f-area-max","f-price-min","f-price-max","f-ppr-min","f-ppr-max","f-frontage","f-traffic","f-comp-radius","f-comp-max","f-source","f-photos","f-verified","f-shortlist","f-mapped","f-hide-suspect","f-q","f-sort","f-rings"].forEach((id) => {
       const el = $(id);
       if (!el) return;
       el.addEventListener("change", () => { if (id === "f-province") fillDistricts(); apply(); });
@@ -656,7 +720,7 @@
       ["f-province","f-district","f-area-min","f-area-max","f-price-min","f-price-max","f-ppr-min","f-ppr-max","f-frontage","f-traffic","f-comp-max","f-source","f-q"].forEach((id) => { $(id).value = ""; });
       $("f-comp-radius").value = "3";
       $("f-score").value = 0; $("f-score-out").textContent = "0";
-      $("f-photos").checked = $("f-verified").checked = $("f-shortlist").checked = $("f-mapped").checked = false;
+      $("f-photos").checked = $("f-verified").checked = $("f-shortlist").checked = $("f-mapped").checked = false; if ($("f-hide-suspect")) $("f-hide-suspect").checked = false;
       roadTypes.clear();
       document.querySelectorAll("#f-road .chip").forEach((c) => c.classList.remove("on"));
       fillDistricts();
@@ -668,7 +732,7 @@
     $("btn-close-compare").addEventListener("click", () => $("compare-modal").classList.remove("open"));
     $("compare-modal").addEventListener("click", (e) => { if (e.target.id === "compare-modal") $("compare-modal").classList.remove("open"); });
     $("btn-filters").addEventListener("click", () => $("sidebar").classList.toggle("open"));
-    $("btn-lang").addEventListener("click", () => { lang = lang === "en" ? "th" : "en"; localStorage.setItem(LANG_KEY, lang); applyI18n(); });
+    $("btn-lang").addEventListener("click", () => { lang = lang === "en" ? "th" : "en"; localStorage.setItem(LANG_KEY, lang); applyI18n(); apply(); if (selectedId) renderDetail(DATA.listings.find((r) => r.id === selectedId)); });
     $("btn-theme").addEventListener("click", () => {
       const next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
       document.documentElement.setAttribute("data-theme", next);

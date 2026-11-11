@@ -66,7 +66,7 @@ Then open http://127.0.0.1:8080/
 | [FazWaz](https://www.fazwaz.com/land-for-sale/thailand) | Supplementary cards (price, area, address, photo). Public HTML has no GPS; a pin is added only when subdistrict + district + province can be geocoded, and that pin is labelled Estimated. |
 | OpenStreetMap (Overpass, or a [Geofabrik](https://www.geofabrik.de/) Thailand shapefile extract if Overpass is unreachable) | Roads, fuel stations, demand generators. © OSM contributors, ODbL. |
 | Nominatim | Locality geocoding, used only when the listing names a subdistrict, district and province. |
-| [DPT city-plan viewer](https://oneplan.dpt.go.th/) | Linked for zoning. Zoning is never guessed. |
+| [DPT city-plan viewer](https://onedpt.dpt.go.th/) | Linked for zoning. Zoning is never guessed. |
 
 Tried and **not** collected in the first harvest (blocks or disallowed paths — no captcha bypass): DDproperty (Cloudflare challenge), Hipflat (HTTP 401), Baania (Cloudflare IP block), Livinginsider sitemap (CloudFront 403), Kaidee / home.co.th search and API paths (disallowed in robots.txt).
 
@@ -75,7 +75,7 @@ The published file always states how many listings were actually collected and f
 ## This harvest (10 Nov 2026, Asia/Bangkok)
 
 - **5,429** land-for-sale listings from **DotProperty**, covering **all 77 provinces**
-- Every listing in this file has published coordinates (4,193 treated as listing-level; 1,236 flagged as area centroids because several listings share the exact point)
+- Every listing in this file has published coordinates (4,193 seller-placed listing pins, labelled “Listing pin (seller-placed, approximate)” — not Verified; 1,236 flagged as area centroids because several listings share the exact point). **520** pins are flagged “Pin may be inaccurate” because they sit on or next to an OSM road or junction (506 on a carriageway buffer, 292 at a junction; some are both).
 - **545** score 70 or above with the default weights
 - FazWaz was tried in the same run but returned **HTTP 403**, so it is not in this file. The collector is still in `pipeline/collect.py` for a later refresh.
 - Nearby roads and fuel stations come from a Geofabrik OSM extract (Overpass was unreachable from the machine that built this file)
@@ -86,6 +86,7 @@ The published file always states how many listings were actually collected and f
 - **Competition** uses OSM `amenity=fuel` counts at 1 / 3 / 5 / 10 km (Estimated; OSM coverage varies).
 - **Missing factors:** location-dependent factors without coordinates are scored 35 (penalty). Missing price or area is scored 50 (neutral). Data completeness is the share of weight that came from computed factors, not these imputations.
 - **Marker colours:** green 70+, yellow 45–69, red below 45.
+- **Listing pins** are seller-placed and approximate, never Verified. Pins that sit on or next to an OSM road / junction are flagged “Pin may be inaccurate”; derived road, competitor and traffic figures then carry a reduced-confidence note. Use the “Hide listings with suspect pins” filter to exclude them.
 - Weights can be changed in the UI; factor scores stay as computed by the pipeline and are only re-averaged in the browser.
 
 ## GitHub Pages

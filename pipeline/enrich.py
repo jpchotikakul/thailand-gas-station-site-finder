@@ -31,7 +31,7 @@ OVERPASS_ENDPOINTS = (
     "https://overpass.openstreetmap.fr/api/interpreter",
 )
 NOMINATIM = "https://nominatim.openstreetmap.org/search"
-DPT_VIEWER = "https://oneplan.dpt.go.th/"
+DPT_VIEWER = "https://onedpt.dpt.go.th/"
 
 # Highway classes we treat as "major" for a gas-station site.
 MAJOR_HIGHWAYS = {
@@ -539,7 +539,9 @@ def flag_shared_coordinates(listings: list[dict]) -> None:
         field = rec.get("coordinates") or {}
         if field.get("value") and "precision" not in field:
             field["precision"] = "listing"
-            field["status"] = field.get("status") or "verified"
+            if field.get("status") in (None, "verified"):
+                field["status"] = "listing_pin"
+            field["note"] = field.get("note") or LISTING_PIN_NOTE
 
 
 def _nominatim_geocode(query: str, cache: dict) -> Optional[dict]:
@@ -1007,6 +1009,222 @@ def build_traffic_proxy(rec: dict) -> dict:
     }
 
 
+
+LISTING_PIN_NOTE = (
+    "Listing pin (seller-placed, approximate). Published with the listing, not a surveyed parcel location."
+)
+SUSPECT_PIN_NOTE = (
+    "Pin may be inaccurate: it sits on or next to an OpenStreetMap road or junction, "
+    "which often means a seller dropped the pin on the carriageway rather than on the parcel."
+)
+REDUCED_CONFIDENCE_NOTE = (
+    "Confidence is reduced: the listing pin appears to sit on or next to an OSM road or junction, "
+    "so distances and nearby counts may not reflect the actual parcel."
+)
+
+# Approximate half-widths (metres) used as a buffer around OSM road centre-lines.
+CARRIAGEWAY_BUFFER_M = {
+    "motorway": 14.0, "motorway_link": 14.0,
+    "trunk": 12.0, "trunk_link": 12.0,
+    "primary": 10.0, "primary_link": 10.0,
+    "secondary": 8.0, "secondary_link": 8.0,
+    "tertiary": 6.0, "tertiary_link": 6.0,
+}
+ON_CARRIAGEWAY_ALWAYS_M = 8.0
+JUNCTION_RADIUS_M = 25.0
+PIN_SEARCH_RADIUS_M = 40.0
+
+
+def relabel_listing_pins(listings: list[dict]) -> None:
+    """Seller-placed listing coordinates are not surveyed — never labelled Verified."""
+    for rec in listings:
+        field = rec.get("coordinates") or {}
+        if not field.get("value"):
+            continue
+        if field.get("precision") in ("area_centroid", "locality_geocode"):
+            continue
+        if field.get("precision") == "listing" or field.get("status") == "verified":
+            field["status"] = "listing_pin"
+            field["precision"] = field.get("precision") or "listing"
+            field["note"] = LISTING_PIN_NOTE
+
+
+def load_geofabrik_roads() -> list[dict]:
+    """Load only major roads from an already-extracted Geofabrik shapefile (fast path)."""
+    dest = CACHE / "geofabrik_shp"
+    roads_path = dest / "gis_osm_roads_free_1.shp"
+    if not roads_path.exists():
+        layers = load_osm_layers()
+        return layers.get("roads") or []
+    import shapefile  # type: ignore
+
+    roads: list[dict] = []
+    r = shapefile.Reader(str(roads_path), encoding="utf-8")
+    fmap = _shp_field_map(r)
+    i_name, i_class, i_ref = fmap.get("name"), fmap.get("fclass"), fmap.get("ref")
+    n = kept = 0
+    for sr in _iter_shape_records(r):
+        n += 1
+        rec, shape = sr.record, sr.shape
+        fclass = (rec[i_class] if i_class is not None else "") or ""
+        if fclass not in ROAD_FCLASS or len(shape.points) < 2:
+            continue
+        coords = [(p[1], p[0]) for p in shape.points]
+        lats = [c[0] for c in coords]
+        lons = [c[1] for c in coords]
+        roads.append(
+            {
+                "name": rec[i_name] if i_name is not None else None,
+                "ref": rec[i_ref] if i_ref is not None else None,
+                "highway": fclass,
+                "coords": coords,
+                "min_lat": min(lats),
+                "max_lat": max(lats),
+                "min_lon": min(lons),
+                "max_lon": max(lons),
+            }
+        )
+        kept += 1
+    log(f"[osm] geofabrik roads (pin-quality): scanned {n}, major kept {kept}")
+    return roads
+
+
+def _road_identity(road: dict) -> str:
+    name = (road.get("name") or "").strip().lower()
+    ref = (road.get("ref") or "").strip().lower()
+    hw = (road.get("highway") or "").replace("_link", "")
+    return name or ref or hw or f"id:{id(road)}"
+
+
+def roads_within(lat: float, lon: float, roads: list[dict], index: dict, radius_m: float) -> list[dict]:
+    if not roads or not index:
+        return []
+    cell = index["cell"]
+    ddeg = (radius_m / 1000.0) / 80.0
+    r0 = int(math_floor((lat - ddeg) / cell))
+    r1 = int(math_floor((lat + ddeg) / cell))
+    c0 = int(math_floor((lon - ddeg) / cell))
+    c1 = int(math_floor((lon + ddeg) / cell))
+    seen = set()
+    out = []
+    for rr in range(r0, r1 + 1):
+        for cc in range(c0, c1 + 1):
+            for idx in index["buckets"].get((rr, cc), ()):
+                if idx in seen:
+                    continue
+                seen.add(idx)
+                road = roads[idx]
+                if road["max_lat"] + ddeg < lat or road["min_lat"] - ddeg > lat:
+                    continue
+                if road["max_lon"] + ddeg < lon or road["min_lon"] - ddeg > lon:
+                    continue
+                best = None
+                coords = road["coords"]
+                for i in range(len(coords) - 1):
+                    d = point_to_segment_m(lat, lon, coords[i][0], coords[i][1], coords[i + 1][0], coords[i + 1][1])
+                    if best is None or d < best:
+                        best = d
+                if best is not None and best <= radius_m:
+                    out.append({"road": road, "distance_m": round(best, 1)})
+    out.sort(key=lambda x: x["distance_m"])
+    return out
+
+
+def assess_pin_quality(lat: float, lon: float, roads: list[dict], index: dict) -> dict:
+    nearby = roads_within(lat, lon, roads, index, PIN_SEARCH_RADIUS_M)
+    if not nearby:
+        return {"status": "ok", "suspect": False, "reasons": [], "nearest_road_m": None, "flags": []}
+    nearest = nearby[0]
+    dist = nearest["distance_m"]
+    hw = nearest["road"].get("highway")
+    buffer = CARRIAGEWAY_BUFFER_M.get(hw, ON_CARRIAGEWAY_ALWAYS_M)
+    flags = []
+    reasons = []
+    if dist <= ON_CARRIAGEWAY_ALWAYS_M or dist <= buffer:
+        label = nearest["road"].get("name") or nearest["road"].get("ref") or hw or "road"
+        flags.append("on_roadway")
+        reasons.append(f"Pin is {dist:.1f} m from an OSM {hw or 'road'} centre-line ({label}).")
+    close = [x for x in nearby if x["distance_m"] <= JUNCTION_RADIUS_M]
+    names, groups = set(), set()
+    for x in close:
+        n = (x["road"].get("name") or x["road"].get("ref") or "").strip().lower()
+        if n:
+            names.add(n)
+        g = (x["road"].get("highway") or "").replace("_link", "")
+        if g:
+            groups.add(g)
+    if len(names) >= 2 or (len(groups) >= 2 and len(close) >= 2):
+        flags.append("on_junction")
+        bits = []
+        if names:
+            bits.append("roads: " + ", ".join(sorted(names)[:4]))
+        if groups:
+            bits.append("classes: " + ", ".join(sorted(groups)))
+        reasons.append(
+            f"{len(close)} OSM ways lie within {JUNCTION_RADIUS_M:.0f} m ({'; '.join(bits)}), consistent with a junction or interchange."
+        )
+    suspect = bool(flags)
+    return {
+        "status": "suspect" if suspect else "ok",
+        "suspect": suspect,
+        "flags": flags,
+        "reasons": reasons,
+        "nearest_road_m": dist,
+        "nearest_highway": hw,
+    }
+
+
+def _append_note(obj, extra: str) -> None:
+    if not isinstance(obj, dict) or not extra:
+        return
+    note = obj.get("note") or ""
+    if extra in note:
+        return
+    obj["note"] = (note + " " + extra).strip() if note else extra
+    if obj.get("status") == "estimated":
+        obj["confidence"] = "reduced"
+
+
+def apply_pin_quality(listings: list[dict], roads: list[dict] | None = None, road_index: dict | None = None) -> dict:
+    """Flag pins that sit on a carriageway or junction; downgrade confidence of derived OSM metrics."""
+    if roads is None:
+        roads = load_geofabrik_roads()
+    if road_index is None:
+        road_index = _grid_index(roads) if roads else {"cell": 0.15, "buckets": {}}
+    counts = {"suspect": 0, "on_roadway": 0, "on_junction": 0, "ok": 0, "unmapped": 0}
+    for rec in listings:
+        coords = (rec.get("coordinates") or {}).get("value")
+        if not coords:
+            rec["pin_quality"] = {"status": "unmapped", "suspect": False, "note": "No coordinates to check."}
+            counts["unmapped"] += 1
+            continue
+        quality = assess_pin_quality(float(coords["lat"]), float(coords["lon"]), roads, road_index)
+        rec["pin_quality"] = quality
+        field = rec["coordinates"]
+        if quality["suspect"]:
+            field["suspect_pin"] = True
+            field["suspect_reason"] = " ".join(quality["reasons"])
+            counts["suspect"] += 1
+            for f in quality["flags"]:
+                counts[f] = counts.get(f, 0) + 1
+            _append_note(rec.get("competitors"), REDUCED_CONFIDENCE_NOTE)
+            _append_note(rec.get("generators"), REDUCED_CONFIDENCE_NOTE)
+            road = rec.get("road") or {}
+            _append_note(road.get("distance_m"), REDUCED_CONFIDENCE_NOTE)
+            _append_note(road.get("highway"), REDUCED_CONFIDENCE_NOTE)
+            _append_note(rec.get("traffic_potential"), REDUCED_CONFIDENCE_NOTE)
+            risks = rec.get("risks") or []
+            if not any("Pin may be inaccurate" in str(x) for x in risks):
+                risks.append(SUSPECT_PIN_NOTE)
+            rec["risks"] = risks
+        else:
+            field.pop("suspect_pin", None)
+            field.pop("suspect_reason", None)
+            counts["ok"] += 1
+    log(f"[pin-quality] {counts}")
+    return counts
+
+
 def enrich(listings: list[dict], skip_geocode: bool = False) -> list[dict]:
     CACHE.mkdir(parents=True, exist_ok=True)
     flag_shared_coordinates(listings)
@@ -1019,5 +1237,7 @@ def enrich(listings: list[dict], skip_geocode: bool = False) -> list[dict]:
         enrich_listing(rec, layers, road_index)
         if i % 100 == 0:
             log(f"[enrich] {i}/{len(listings)}")
+    relabel_listing_pins(listings)
+    apply_pin_quality(listings, layers.get("roads") or [], road_index)
     log(f"[enrich] done {len(listings)} listings")
     return listings

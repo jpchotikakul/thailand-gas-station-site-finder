@@ -209,8 +209,8 @@ def parse_dotproperty_listing(item: dict, page_url: str, scraped_at: str) -> Opt
         "coordinates": (
             _field(
                 {"lat": float(lat), "lon": float(lon)},
-                "verified",
-                "Coordinates published in the listing’s public schema.org data. Accuracy is only as good as the source; later flagged if several listings share the same point (likely an area centroid).",
+                "listing_pin",
+                "Listing pin (seller-placed, approximate). Published with the listing, not a surveyed parcel location.",
             )
             if has_coords
             else _empty_field("unavailable", "The listing did not publish coordinates.")

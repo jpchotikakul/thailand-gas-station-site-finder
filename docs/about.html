@@ -46,10 +46,13 @@
     <p>Every field carries a badge. Nothing is invented to fill a gap.</p>
     <table>
       <tr><th>Badge</th><th>Meaning</th></tr>
-      <tr><td>Verified</td><td>Taken from the public listing (title, card, description or schema.org fields published by the source).</td></tr>
+      <tr><td>Verified</td><td>Taken from the public listing (title, card, description, asking price, stated area or frontage). Not used for map pins.</td></tr>
+      <tr><td>Listing pin (seller-placed, approximate)<br>หมุดจากประกาศ (ผู้ขายปัก โดยประมาณ)</td><td>Coordinates published with the listing. These are seller-placed map pins, not a surveyed parcel location, so they are never shown as Verified.</td></tr>
       <tr><td>Calculated</td><td>Derived only from verified listing figures — for example asking price ÷ land area to get price per rai, or conversion of square metres to rai (1 rai = 1,600 sqm = 4 ngan = 400 sq wah).</td></tr>
       <tr><td>Estimated</td><td>Derived from OpenStreetMap, a locality geocode, or a documented proxy. Not a surveyed or official figure.</td></tr>
+      <tr><td>Neutral / penalty default – data missing</td><td>Used only in the score breakdown when a factor cannot be computed because an input is missing. Neutral default is 50 (for example no asking price or area). Penalty default is 35 when a location-dependent factor has no coordinates. These are documented fallbacks, not invented measurements.</td></tr>
       <tr><td>Data not available</td><td>The information was not in the listing and was not inferred.</td></tr>
+      <tr><td>Pin may be inaccurate<br>หมุดอาจไม่ตรงแปลง</td><td>The listing pin sits on or next to an OpenStreetMap road or junction (see Coordinates below).</td></tr>
     </table>
     <p>If several listings share the exact same published coordinates, those points are relabelled Estimated (area / locality centroid), because they are unlikely to be surveyed parcel locations.</p>
 
@@ -65,8 +68,15 @@
     </table>
     <p>DotProperty and FazWaz share a lot of inventory (photos often come from the same CDN). The pipeline deduplicates by FazWaz unit id, or by coordinates + price + area, and keeps the richer record. The number of listings on the board is whatever was legitimately collected in the last run — it is a sample, not every land plot for sale in Thailand.</p>
 
-    <h2>Coordinates</h2>
-    <p>If a listing publishes coordinates, they are used and marked Verified, unless they are clearly a shared area centroid (then Estimated). If a listing has no coordinates but names a <em>subdistrict, district and province</em>, the pipeline may look up a Nominatim centroid and mark it Estimated (approximate locality, not a parcel survey). A province-only address is not geocoded — the map pin is omitted and the field stays “Data not available.”</p>
+    <h2>Coordinates and pin quality</h2>
+    <p>If a listing publishes coordinates, they are used and labelled <strong>Listing pin (seller-placed, approximate)</strong> / <strong>หมุดจากประกาศ (ผู้ขายปัก โดยประมาณ)</strong> — not Verified. Portal pins are placed by sellers and are often inexact (for example dropped on a highway or in the middle of a junction). If several listings share the exact same point, it is relabelled Estimated (area / locality centroid). If a listing has no coordinates but names a <em>subdistrict, district and province</em>, the pipeline may look up a Nominatim centroid and mark it Estimated (approximate locality, not a parcel survey). A province-only address is not geocoded — the map pin is omitted and the field stays “Data not available.”</p>
+    <p>Each mapped pin is also checked against OpenStreetMap major-road geometry from the same extract used for roads and competitors:</p>
+    <ul>
+      <li>A pin is flagged <strong>Pin may be inaccurate</strong> if it falls within a class-based buffer of a road centre-line (about 8–14 m, depending on motorway / trunk / primary / secondary / tertiary) or within 8 m of any major road, or if two differently named or classed OSM roads lie within 25 m (a junction / interchange proxy).</li>
+      <li>A visible warning appears on the detail panel. A filter, “Hide listings with suspect pins,” removes them from the map and list.</li>
+      <li>Road distance, competitor counts, demand-generator counts and the traffic-potential proxy for a flagged pin are still shown (they are computed from the published point) but carry a reduced-confidence note. The numbers are not invented or quietly moved.</li>
+      <li>This is a data-quality flag, not proof that the land itself sits on the road. A genuine roadside plot can also fall inside the buffer. Use satellite view and a survey to confirm.</li>
+    </ul>
 
     <h2>Traffic potential</h2>
     <p>Official Department of Highways traffic-count figures were not matched to individual sites in this release. There is no invented vehicle count. Instead, each mapped site gets a <strong>0–100 proxy</strong>, labelled Estimated, built from:</p>
@@ -83,7 +93,7 @@
     <p>Existing fuel stations are OpenStreetMap points tagged <code>amenity=fuel</code>, counted within 1, 3, 5 and 10 km. Names and brands are whatever OSM has. Coverage in Thailand is good in many corridors and thin in others — treat counts as Estimated. Nearby convenience stores, restaurants, EV chargers, malls, industrial areas, schools, hospitals and attractions also come from OSM and are labelled Estimated.</p>
 
     <h2>Zoning</h2>
-    <p>Thai city-plan zoning (ผังเมือง) is generally not available through a public API. This tool does <strong>not</strong> guess zoning. The field is “Data not available,” with a link to the official Department of Public Works and Town &amp; Country Planning (DPT) city-plan viewer: <a href="https://oneplan.dpt.go.th/" target="_blank" rel="noopener">oneplan.dpt.go.th</a>. Confirm with the local authority.</p>
+    <p>Thai city-plan zoning (ผังเมือง) is generally not available through a public API. This tool does <strong>not</strong> guess zoning. The field is “Data not available,” with a link to the official Department of Public Works and Town &amp; Country Planning (DPT) city-plan viewer: <a href="https://onedpt.dpt.go.th/" target="_blank" rel="noopener">onedpt.dpt.go.th</a>. Confirm with the local authority.</p>
 
     <h2>Suitability score (0–100)</h2>
     <p>Default weights, which you can change on the map (they are renormalised to 100):</p>
@@ -102,7 +112,7 @@
       <li>If the factor needs a location and coordinates are missing, it is scored <strong>35 (penalty)</strong> and marked imputed.</li>
       <li>If a non-location input is missing (for example no asking price), it is scored <strong>50 (neutral)</strong> and marked imputed.</li>
     </ul>
-    <p>The overall score is the weighted average of all six factors, including imputations, so the weights still add to 100. <strong>Data completeness</strong> is the share of that weight that came from computed factors, not imputations. Marker colours: green = 70 and above, yellow = 45–69, red = under 45.</p>
+    <p>The overall score is the weighted average of all six factors, including imputations, so the weights still add to 100. <strong>Data completeness</strong> is the share of that weight that came from computed factors, not imputations. In the score breakdown, a computed factor shows the provenance of its inputs (Verified for listing area, Calculated for price-vs-median, Estimated for OSM / proxy factors). A fallback score shows <strong>Neutral default – data missing</strong> or <strong>Penalty default – data missing</strong>, not “Data not available.” Marker colours: green = 70 and above, yellow = 45–69, red = under 45.</p>
     <p>Advantages and risks are generated only from these facts. They are not marketing copy.</p>
 
     <h2>How to run the pipeline</h2>
